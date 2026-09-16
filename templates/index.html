@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MNIST CNN — draw a digit</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f4f5f7;
+      color: #1c1e21;
+    }
+    .card {
+      background: #fff;
+      padding: 32px;
+      border-radius: 12px;
+      box-shadow: 0 2px 16px rgba(0, 0, 0, .08);
+      text-align: center;
+    }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    p.hint { margin: 0 0 20px; color: #6b7280; font-size: 14px; }
+    canvas {
+      border: 2px solid #d1d5db;
+      border-radius: 8px;
+      touch-action: none;
+      cursor: crosshair;
+      background: #fff;
+    }
+    .actions { margin-top: 16px; display: flex; gap: 8px; justify-content: center; }
+    button {
+      padding: 8px 18px;
+      font-size: 14px;
+      border-radius: 6px;
+      border: 1px solid #d1d5db;
+      background: #fff;
+      cursor: pointer;
+    }
+    button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+    button:disabled { opacity: .6; cursor: default; }
+    #result { margin-top: 20px; min-height: 58px; }
+    #digit { font-size: 44px; font-weight: 700; line-height: 1; }
+    #confidence { color: #6b7280; font-size: 14px; }
+    .bars { margin-top: 16px; display: grid; gap: 4px; }
+    .bar { display: grid; grid-template-columns: 16px 1fr 44px; align-items: center; gap: 8px; font-size: 12px; }
+    .bar .track { background: #e5e7eb; border-radius: 4px; height: 8px; overflow: hidden; }
+    .bar .fill { display: block; background: #2563eb; height: 100%; width: 0; transition: width .2s; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Handwritten digit recognition</h1>
+    <p class="hint">Draw a digit (0-9) in the box, then press Predict.</p>
+
+    <canvas id="pad" width="280" height="280"></canvas>
+
+    <div class="actions">
+      <button id="predict" class="primary">Predict</button>
+      <button id="clear">Clear</button>
+    </div>
+
+    <div id="result"></div>
+
+    <div class="bars" id="bars"></div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('pad');
+    const ctx = canvas.getContext('2d');
+    const result = document.getElementById('result');
+    const bars = document.getElementById('bars');
+    const predictButton = document.getElementById('predict');
+
+    ctx.lineWidth = 18;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#000';
+
+    let drawing = false;
+
+    function position(event) {
+      const rect = canvas.getBoundingClientRect();
+      const point = event.touches ? event.touches[0] : event;
+      return { x: point.clientX - rect.left, y: point.clientY - rect.top };
+    }
+
+    function start(event) {
+      event.preventDefault();
+      drawing = true;
+      const { x, y } = position(event);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+    }
+
+    function move(event) {
+      if (!drawing) return;
+      event.preventDefault();
+      const { x, y } = position(event);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
+
+    function end() { drawing = false; }
+
+    canvas.addEventListener('mousedown', start);
+    canvas.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', end);
+    canvas.addEventListener('touchstart', start);
+    canvas.addEventListener('touchmove', move);
+    canvas.addEventListener('touchend', end);
+
+    function clearPad() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      result.innerHTML = '';
+      bars.innerHTML = '';
+    }
+
+    function renderBars(probabilities) {
+      bars.innerHTML = probabilities.map((p, digit) => `
+        <div class="bar">
+          <span>${digit}</span>
+          <span class="track"><span class="fill" style="width: ${(p * 100).toFixed(1)}%"></span></span>
+          <span>${(p * 100).toFixed(1)}%</span>
+        </div>`).join('');
+    }
+
+    document.getElementById('clear').addEventListener('click', clearPad);
+
+    predictButton.addEventListener('click', async () => {
+      predictButton.disabled = true;
+      result.innerHTML = 'Predicting…';
+      try {
+        const response = await fetch('/predict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: canvas.toDataURL('image/png') })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Prediction failed');
+        result.innerHTML = `<div id="digit">${data.digit}</div>
+          <div id="confidence">confidence ${(data.confidence * 100).toFixed(1)}%</div>`;
+        renderBars(data.probabilities);
+      } catch (error) {
+        result.textContent = error.message;
+        bars.innerHTML = '';
+      } finally {
+        predictButton.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
